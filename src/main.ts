@@ -65,40 +65,47 @@ async function analyzeCode(
 
   for (const file of parsedDiff) {
     if (file.to === "/dev/null") continue; // Ignore deleted files
-    for (const chunk of file.chunks) {
-      const prompt = createPrompt(file, chunk, prDetails, promptAdjustment);
-      const aiResponse = await getAIResponse(prompt);
-      if (aiResponse) {
-        const newComments = createComment(file, chunk, aiResponse);
-        if (newComments) {
-          comments.push(...newComments);
-        }
+
+    // Consolidate all chunks for this file into a single prompt
+    const prompt = createPromptForFile(file, prDetails, promptAdjustment);
+    const aiResponse = await getAIResponse(prompt);
+    if (aiResponse) {
+      const newComments = createCommentsFromResponse(file, aiResponse);
+      if (newComments) {
+        comments.push(...newComments);
       }
     }
   }
   return comments;
 }
 
-function createPrompt(
+function createPromptForFile(
   file: File,
-  chunk: Chunk,
   prDetails: PRDetails,
   promptAdjustment = ""
 ): string {
-  return `Your task is to review pull requests. Instructions:
-- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
-- Do not give positive comments or compliments.
-- Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
-- Write the comment in GitHub Markdown format.
-- Use the given description only for the overall context and only comment the code.
+  // Combine all chunks into a single diff representation
+  const chunksContent = file.chunks
+    .map((chunk) => {
+      return `${chunk.content}
+${chunk.changes
+  // @ts-expect-error - ln and ln2 exists where needed
+  .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
+  .join("\n")}`;
+    })
+    .join("\n\n");
+
+  return `Your task is to review code diffs. Instructions:
+- Provide the response in JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>"}]}
+- Do not give compliments.
+- Only provide comments and suggestions if there is something to improve; otherwise, "reviews" should be an empty array.
+- Write in GitHub Markdown format.
 - IMPORTANT: NEVER suggest adding comments to the code.
 
 ${promptAdjustment}
 
-Review the following code diff in the file "${
-    file.to
-  }" and take the pull request title and description into account when writing the response.
-  
+Review the following code diff in file "${file.to}" and consider the pull request context.
+
 Pull request title: ${prDetails.title}
 Pull request description:
 
@@ -109,46 +116,42 @@ ${prDetails.description}
 Git diff to review:
 
 \`\`\`diff
-${chunk.content}
-${chunk.changes
-  // @ts-expect-error - ln and ln2 exists where needed
-  .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
-  .join("\n")}
+${chunksContent}
 \`\`\`
 `;
 }
 
 function modelSupportsJsonResponse(model: string): boolean {
-  const supportedModels = [
-    "gpt-4o",
-    "gpt-4o-mini",
-    "gpt-4.5-preview",
-    "o3-mini",
-    "o1",
-    "o1-mini",
-  ];
+  const supportedModels = ["gpt-4o", "gpt-4.5-preview", "o3-mini", "o1"];
   return supportedModels.includes(model);
 }
 
-async function getAIResponse(prompt: string): Promise<Array<{
-  lineNumber: string;
-  reviewComment: string;
-}> | null> {
-  // Base configuration for all models
+function getQueryConfig() {
   const queryConfig: any = {
     model: OPENAI_API_MODEL,
-    temperature: 0.2,
-    frequency_penalty: 0.2,
-    presence_penalty: 0,
   };
 
-  // Add max_tokens for older models that support it
+  if (OPENAI_API_MODEL.startsWith("gpt-4")) {
+    queryConfig.temperature = 0.2;
+    queryConfig.frequency_penalty = 0.2;
+    queryConfig.presence_penalty = 0;
+  }
+
   const maxTokens = 5000;
   if (OPENAI_API_MODEL === "gpt-4") {
     queryConfig.max_tokens = maxTokens;
   } else {
     queryConfig.max_completion_tokens = maxTokens;
   }
+
+  return queryConfig;
+}
+
+async function getAIResponse(prompt: string): Promise<Array<{
+  lineNumber: string;
+  reviewComment: string;
+}> | null> {
+  const queryConfig = getQueryConfig();
 
   try {
     const response = await openai.chat.completions.create({
@@ -173,13 +176,9 @@ async function getAIResponse(prompt: string): Promise<Array<{
   }
 }
 
-function createComment(
+function createCommentsFromResponse(
   file: File,
-  chunk: Chunk,
-  aiResponses: Array<{
-    lineNumber: string;
-    reviewComment: string;
-  }>
+  aiResponses: Array<{ lineNumber: string; reviewComment: string }>
 ): Array<{ body: string; path: string; line: number }> {
   return aiResponses.flatMap((aiResponse) => {
     if (!file.to) {
