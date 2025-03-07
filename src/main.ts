@@ -61,11 +61,12 @@ async function analyzeCode(
   prDetails: PRDetails
 ): Promise<Array<{ body: string; path: string; line: number }>> {
   const comments: Array<{ body: string; path: string; line: number }> = [];
+  const promptAdjustment = core.getInput("prompt_adjustment");
 
   for (const file of parsedDiff) {
     if (file.to === "/dev/null") continue; // Ignore deleted files
     for (const chunk of file.chunks) {
-      const prompt = createPrompt(file, chunk, prDetails);
+      const prompt = createPrompt(file, chunk, prDetails, promptAdjustment);
       const aiResponse = await getAIResponse(prompt);
       if (aiResponse) {
         const newComments = createComment(file, chunk, aiResponse);
@@ -78,7 +79,12 @@ async function analyzeCode(
   return comments;
 }
 
-function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
+function createPrompt(
+  file: File,
+  chunk: Chunk,
+  prDetails: PRDetails,
+  promptAdjustment = ""
+): string {
   return `Your task is to review pull requests. Instructions:
 - Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
 - Do not give positive comments or compliments.
@@ -86,6 +92,8 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
 - Write the comment in GitHub Markdown format.
 - Use the given description only for the overall context and only comment the code.
 - IMPORTANT: NEVER suggest adding comments to the code.
+
+${promptAdjustment}
 
 Review the following code diff in the file "${
     file.to
@@ -111,7 +119,14 @@ ${chunk.changes
 }
 
 function modelSupportsJsonResponse(model: string): boolean {
-  const supportedModels = ["gpt-4o", "gpt-4o-mini", "gpt-4.5-preview", "o3-mini", "o1", "o1-mini"];
+  const supportedModels = [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4.5-preview",
+    "o3-mini",
+    "o1",
+    "o1-mini",
+  ];
   return supportedModels.includes(model);
 }
 

@@ -88,11 +88,12 @@ function getDiff(owner, repo, pull_number) {
 function analyzeCode(parsedDiff, prDetails) {
     return __awaiter(this, void 0, void 0, function* () {
         const comments = [];
+        const promptAdjustment = core.getInput("prompt_adjustment");
         for (const file of parsedDiff) {
             if (file.to === "/dev/null")
                 continue; // Ignore deleted files
             for (const chunk of file.chunks) {
-                const prompt = createPrompt(file, chunk, prDetails);
+                const prompt = createPrompt(file, chunk, prDetails, promptAdjustment);
                 const aiResponse = yield getAIResponse(prompt);
                 if (aiResponse) {
                     const newComments = createComment(file, chunk, aiResponse);
@@ -105,7 +106,7 @@ function analyzeCode(parsedDiff, prDetails) {
         return comments;
     });
 }
-function createPrompt(file, chunk, prDetails) {
+function createPrompt(file, chunk, prDetails, promptAdjustment = "") {
     return `Your task is to review pull requests. Instructions:
 - Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
 - Do not give positive comments or compliments.
@@ -113,6 +114,8 @@ function createPrompt(file, chunk, prDetails) {
 - Write the comment in GitHub Markdown format.
 - Use the given description only for the overall context and only comment the code.
 - IMPORTANT: NEVER suggest adding comments to the code.
+
+${promptAdjustment}
 
 Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
   
@@ -135,7 +138,14 @@ ${chunk.changes
 `;
 }
 function modelSupportsJsonResponse(model) {
-    const supportedModels = ["gpt-4o", "gpt-4o-mini", "gpt-4.5-preview", "o3-mini", "o1", "o1-mini"];
+    const supportedModels = [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4.5-preview",
+        "o3-mini",
+        "o1",
+        "o1-mini",
+    ];
     return supportedModels.includes(model);
 }
 function getAIResponse(prompt) {
