@@ -61,11 +61,12 @@ async function analyzeCode(
   prDetails: PRDetails
 ): Promise<Array<{ body: string; path: string; line: number }>> {
   const comments: Array<{ body: string; path: string; line: number }> = [];
+  const promptAdjustment = core.getInput("prompt_adjustment");
 
   for (const file of parsedDiff) {
     if (file.to === "/dev/null") continue; // Ignore deleted files
     for (const chunk of file.chunks) {
-      const prompt = createPrompt(file, chunk, prDetails);
+      const prompt = createPrompt(file, chunk, prDetails, promptAdjustment);
       const aiResponse = await getAIResponse(prompt);
       if (aiResponse) {
         const newComments = createComment(file, chunk, aiResponse);
@@ -78,7 +79,12 @@ async function analyzeCode(
   return comments;
 }
 
-function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
+function createPrompt(
+  file: File,
+  chunk: Chunk,
+  prDetails: PRDetails,
+  promptAdjustment = ""
+): string {
   return `Your task is to review pull requests. Instructions:
 - Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
 - Do not give positive comments or compliments.
@@ -86,6 +92,8 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
 - Write the comment in GitHub Markdown format.
 - Use the given description only for the overall context and only comment the code.
 - IMPORTANT: NEVER suggest adding comments to the code.
+
+${promptAdjustment}
 
 Review the following code diff in the file "${
     file.to
@@ -110,24 +118,43 @@ ${chunk.changes
 `;
 }
 
+function modelSupportsJsonResponse(model: string): boolean {
+  const supportedModels = [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4.5-preview",
+    "o3-mini",
+    "o1",
+    "o1-mini",
+  ];
+  return supportedModels.includes(model);
+}
+
 async function getAIResponse(prompt: string): Promise<Array<{
   lineNumber: string;
   reviewComment: string;
 }> | null> {
-  const queryConfig = {
+  // Base configuration for all models
+  const queryConfig: any = {
     model: OPENAI_API_MODEL,
     temperature: 0.2,
-    max_tokens: 700,
-    top_p: 1,
-    frequency_penalty: 0,
+    frequency_penalty: 0.2,
     presence_penalty: 0,
   };
+
+  // Add max_tokens for older models that support it
+  const maxTokens = 5000;
+  if (OPENAI_API_MODEL === "gpt-4") {
+    queryConfig.max_tokens = maxTokens;
+  } else {
+    queryConfig.max_completion_tokens = maxTokens;
+  }
 
   try {
     const response = await openai.chat.completions.create({
       ...queryConfig,
       // return JSON if the model supports it:
-      ...(OPENAI_API_MODEL === "gpt-4-1106-preview"
+      ...(modelSupportsJsonResponse(OPENAI_API_MODEL)
         ? { response_format: { type: "json_object" } }
         : {}),
       messages: [
