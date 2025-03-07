@@ -110,6 +110,11 @@ ${chunk.changes
 `;
 }
 
+function modelSupportsJsonResponse(model: string): boolean {
+  const supportedModels = ["gpt-4o", "gpt-4o-mini", "gpt-4.5-preview", "o3-mini", "o1", "o1-mini"];
+  return supportedModels.includes(model);
+}
+
 async function getAIResponse(prompt: string): Promise<Array<{
   lineNumber: string;
   reviewComment: string;
@@ -127,7 +132,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
     const response = await openai.chat.completions.create({
       ...queryConfig,
       // return JSON if the model supports it:
-      ...(OPENAI_API_MODEL === "gpt-4-1106-preview"
+      ...(modelSupportsJsonResponse(OPENAI_API_MODEL)
         ? { response_format: { type: "json_object" } }
         : {}),
       messages: [
