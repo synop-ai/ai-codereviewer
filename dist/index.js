@@ -151,14 +151,21 @@ function modelSupportsJsonResponse(model) {
 function getAIResponse(prompt) {
     var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        // Base configuration for all models
         const queryConfig = {
             model: OPENAI_API_MODEL,
             temperature: 0.2,
-            max_tokens: 700,
-            top_p: 1,
-            frequency_penalty: 0,
+            frequency_penalty: 0.2,
             presence_penalty: 0,
         };
+        // Add max_tokens for older models that support it
+        const maxTokens = 5000;
+        if (OPENAI_API_MODEL === "gpt-4") {
+            queryConfig.max_tokens = maxTokens;
+        }
+        else {
+            queryConfig.max_completion_tokens = maxTokens;
+        }
         try {
             const response = yield openai.chat.completions.create(Object.assign(Object.assign(Object.assign({}, queryConfig), (modelSupportsJsonResponse(OPENAI_API_MODEL)
                 ? { response_format: { type: "json_object" } }

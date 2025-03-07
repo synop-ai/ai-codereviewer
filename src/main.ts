@@ -134,14 +134,21 @@ async function getAIResponse(prompt: string): Promise<Array<{
   lineNumber: string;
   reviewComment: string;
 }> | null> {
-  const queryConfig = {
+  // Base configuration for all models
+  const queryConfig: any = {
     model: OPENAI_API_MODEL,
     temperature: 0.2,
-    max_tokens: 700,
-    top_p: 1,
-    frequency_penalty: 0,
+    frequency_penalty: 0.2,
     presence_penalty: 0,
   };
+
+  // Add max_tokens for older models that support it
+  const maxTokens = 5000;
+  if (OPENAI_API_MODEL === "gpt-4") {
+    queryConfig.max_tokens = maxTokens;
+  } else {
+    queryConfig.max_completion_tokens = maxTokens;
+  }
 
   try {
     const response = await openai.chat.completions.create({
